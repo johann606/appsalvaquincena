@@ -187,10 +187,14 @@ body {
   background: linear-gradient(135deg, var(--primary-orange), var(--primary-orange-dark));
   color: var(--white);
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: 24px 24px 22px;
+  min-height: 178px;
   position: relative;
   overflow: hidden;
   box-shadow: 0 12px 28px rgba(255, 107, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .balance-card::before {
@@ -214,17 +218,20 @@ body {
 }
 
 .balance-card-val {
-  font-size: 2.1rem;
+  font-size: clamp(1.75rem, 8vw, 2.1rem);
   font-weight: 800;
-  margin: 6px 0 18px 0;
+  line-height: 1.05;
+  margin: 8px 0 22px 0;
+  overflow-wrap: anywhere;
 }
 
 .balance-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.15);
-  padding-top: 16px;
+  padding-top: 14px;
+  min-height: 42px;
 }
 
 .balance-grid-item {
@@ -249,8 +256,27 @@ body {
 }
 
 .balance-grid-info h4 {
-  font-size: 0.95rem;
+  font-size: clamp(0.78rem, 3.2vw, 0.95rem);
   font-weight: 600;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 380px) {
+  .balance-card {
+    padding: 20px 20px 18px;
+    min-height: 188px;
+  }
+
+  .balance-grid-item {
+    align-items: flex-start;
+  }
+
+  .balance-grid-icon {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+  }
 }
 
 /* Quick Action / Buttons */
