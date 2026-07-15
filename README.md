@@ -73,42 +73,33 @@ La app todavia conserva persistencia local para funcionar rapido en el dispositi
 - `salvaquincena_payments`
 - `salvaquincena_tx_id`
 
-Ya existe backend en Laravel para guardar usuarios, historico financiero, pagos y suscripciones. El siguiente paso del frontend es conectar las pantallas actuales contra estos endpoints para que el respaldo sea automatico entre dispositivos.
+Ya existe backend en Laravel para guardar usuarios, historico financiero, pagos y suscripciones. El frontend se conecta al backend mediante `VITE_API_URL` y conserva copia local para tolerar fallos temporales de red.
 
-El boton "Cerrar sesion" elimina del dispositivo la cuenta local, pagos asociados, estado PRO y el ultimo id de transaccion Wompi. No borra ingresos, gastos, metas ni deudas.
+El boton "Cerrar sesion" elimina del dispositivo el token de API, la cuenta local, pagos asociados, estado PRO y el ultimo id de transaccion Wompi. No borra ingresos, gastos, metas ni deudas locales.
 
 ## Pagos PRO
 
-El checkout de Wompi se carga desde `index.html`:
-
-```html
-<script src="https://checkout.wompi.co/widget.js" data-render="explicit"></script>
-```
-
-La configuracion del pago vive en `src/utils/wompi.ts`. Lee estas variables de entorno de Vite y, si no existen, usa los valores definidos en el archivo:
-
-- `VITE_WOMPI_PUBLIC_KEY`
-- `VITE_WOMPI_INTEGRITY_SECRET`
-
-Existe un ejemplo en `.env.example`. Crea un archivo `.env.local` con tus llaves reales:
+El checkout de Wompi se crea desde el backend Laravel para no exponer llaves sensibles en React. El frontend solo necesita conocer la URL de la API:
 
 ```bash
-VITE_WOMPI_PUBLIC_KEY=pub_test_o_pub_prod_del_panel
-VITE_WOMPI_INTEGRITY_SECRET=test_integrity_o_prod_integrity_del_mismo_ambiente
+VITE_API_URL=https://appsalvaquincena.cafeysoftware.com
 ```
 
-Para pruebas se deben usar llaves sandbox de Wompi (`pub_test_` y `test_integrity_`). Para cobros reales se usan llaves de produccion (`pub_prod_` y `prod_integrity_`) del mismo comercio.
+Las llaves Wompi viven en `backend/.env`. Para pruebas se deben usar llaves sandbox de Wompi y para cobros reales llaves de produccion del mismo comercio.
 
-Si Wompi responde `403` en `https://checkout.wompi.co/p/`, normalmente el problema esta en las llaves, el ambiente mezclado, el comercio no activo o una restriccion de Wompi. No es un error de React.
+Antes de pagar se solicita iniciar sesion o crear cuenta. El frontend pide a Laravel:
 
-Antes de pagar se solicita una cuenta local. Cuando Wompi aprueba la transaccion, la app:
+```text
+POST /api/subscription/checkout
+```
+
+Cuando Wompi aprueba la transaccion, el webhook del backend:
 
 - activa PRO;
-- guarda un registro en `salvaquincena_payments`;
-- guarda el id de transaccion en `salvaquincena_tx_id`;
-- crea una transaccion de gasto por el valor del plan PRO, ligada al pago por `paymentId`.
+- guarda un registro de pago asociado al usuario;
+- actualiza la suscripcion mensual o anual.
 
-Importante: no agregar llaves privadas ni secrets de eventos en el frontend. El backend ya tiene webhook para validar eventos de Wompi y activar suscripciones PRO desde servidor.
+Importante: no agregar llaves privadas ni secrets de eventos en el frontend.
 
 ## Backend Laravel / Filament
 

@@ -23,6 +23,7 @@ class SubscriptionController extends Controller
     {
         $data = $request->validate([
             'plan' => ['required', 'in:monthly,annual'],
+            'redirect_url' => ['nullable', 'url'],
         ]);
 
         $plans = [
@@ -58,7 +59,9 @@ class SubscriptionController extends Controller
             'signature:integrity=' . urlencode($signature),
         ];
 
-        if ($request->getScheme() === 'https') {
+        if ($data['redirect_url'] ?? null) {
+            $params[] = 'redirect-url=' . urlencode($data['redirect_url']);
+        } elseif ($request->getScheme() === 'https') {
             $params[] = 'redirect-url=' . urlencode(config('app.url'));
         }
 

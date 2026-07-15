@@ -21,7 +21,19 @@ import {
 } from 'lucide-react';
 import { Transaction, SavingsGoal, Debt, AccountProfile, PaymentRecord } from './types';
 import { runDebtSimulation, teaToTem } from './utils/debtCalculator';
-import { buildWompiCheckoutUrl, WOMPI_PLANS, WompiPlanId } from './utils/wompi';
+import { WOMPI_PLANS, WompiPlanId } from './utils/wompi';
+import {
+  clearApiToken,
+  createProCheckout,
+  fetchCurrentAccount,
+  fetchSync,
+  getApiToken,
+  loginAccount,
+  logoutAccount,
+  pushSync,
+  refreshSubscription,
+  registerAccount,
+} from './utils/api';
 
 
 // Formatter for Colombian Pesos
@@ -163,6 +175,11 @@ export default function App() {
   const [accountEmail, setAccountEmail] = useState(accountProfile?.email ?? '');
   const [accountPhone, setAccountPhone] = useState(accountProfile?.phone ?? '');
   const [acceptedTerms, setAcceptedTerms] = useState(Boolean(accountProfile?.acceptedTermsAt));
+  const [accountPassword, setAccountPassword] = useState('');
+  const [accountMode, setAccountMode] = useState<'login' | 'register'>(() => accountProfile ? 'login' : 'register');
+  const [apiToken, setApiTokenState] = useState(() => getApiToken());
+  const [isAccountLoading, setIsAccountLoading] = useState(false);
+  const [isSyncReady, setIsSyncReady] = useState(false);
 
   // Synchronize with localStorage
   useEffect(() => {
@@ -192,26 +209,116 @@ export default function App() {
   }, [paymentRecords]);
 
   useEffect(() => {
+    if (!apiToken) {
+      setIsSyncReady(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadRemoteData = async () => {
+      try {
+        const [profile, remote] = await Promise.all([
+          fetchCurrentAccount(),
+          fetchSync(),
+        ]);
+
+        if (cancelled) return;
+
+        setAccountProfile(profile);
+        setAccountName(profile.name);
+        setAccountEmail(profile.email);
+        setAccountPhone(profile.phone);
+        setAcceptedTerms(Boolean(profile.acceptedTermsAt));
+        setPaymentRecords(remote.payments);
+        setIsPro(remote.isPro);
+
+        const hasRemoteData = remote.transactions.length > 0 || remote.savingsGoals.length > 0 || remote.debts.length > 0;
+
+        if (hasRemoteData) {
+          setTransactions(remote.transactions);
+          setSavingsGoals(remote.savingsGoals);
+          setDebts(remote.debts);
+        } else {
+          const synced = await pushSync({ transactions, savingsGoals, debts });
+          if (cancelled) return;
+          setPaymentRecords(synced.payments);
+          setIsPro(synced.isPro);
+        }
+
+        setIsSyncReady(true);
+      } catch {
+        clearApiToken();
+        setApiTokenState('');
+        setIsSyncReady(false);
+      }
+    };
+
+    loadRemoteData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiToken]);
+
+  useEffect(() => {
+    if (!apiToken || !isSyncReady) return;
+
+    const timeout = window.setTimeout(async () => {
+      try {
+        const synced = await pushSync({ transactions, savingsGoals, debts });
+        setPaymentRecords(synced.payments);
+        setIsPro(synced.isPro);
+      } catch {
+        setNotice({
+          title: 'Sincronizacion pendiente',
+          message: 'No se pudo guardar en el backend en este momento. Tus datos siguen guardados localmente y se reintentara cuando vuelvas a cambiar algo.',
+          tone: 'warning'
+        });
+      }
+    }, 900);
+
+    return () => window.clearTimeout(timeout);
+  }, [transactions, savingsGoals, debts, apiToken, isSyncReady]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const wompiTransactionId = params.get('id');
     const pendingReference = localStorage.getItem('salvaquincena_pending_payment_reference');
-    const pendingPlan = (localStorage.getItem('salvaquincena_pending_payment_plan') as WompiPlanId | null) || 'monthly';
 
-    if (!wompiTransactionId || !pendingReference || !accountProfile) return;
+    if (!wompiTransactionId || !pendingReference || !apiToken) return;
 
-    registerApprovedProPayment(wompiTransactionId, pendingReference, pendingPlan);
-    setIsPro(true);
-    localStorage.removeItem('salvaquincena_pending_payment_reference');
-    localStorage.removeItem('salvaquincena_pending_payment_plan');
-    window.history.replaceState({}, document.title, window.location.pathname);
-    setNotice({
-      title: 'Pago registrado',
-      message: 'Wompi devolvio la transaccion a la app. SalvaQuincena PRO quedo activo y el pago se registro como gasto.',
-      tone: 'success',
-      actionLabel: 'Ver cuenta',
-      onAction: () => setActiveTab('account')
-    });
-  }, [accountProfile]);
+    const refreshPaymentState = async () => {
+      try {
+        const [proActive, remote] = await Promise.all([
+          refreshSubscription(),
+          fetchSync(),
+        ]);
+        setIsPro(proActive);
+        setPaymentRecords(remote.payments);
+        localStorage.removeItem('salvaquincena_pending_payment_reference');
+        localStorage.removeItem('salvaquincena_pending_payment_plan');
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setNotice({
+          title: proActive ? 'Pago aprobado' : 'Pago en validacion',
+          message: proActive
+            ? 'Wompi confirmo el pago y tu plan PRO quedo activo en tu cuenta.'
+            : 'Wompi recibio el pago. Si aun no aparece activo, espera unos minutos mientras llega la confirmacion del webhook.',
+          tone: proActive ? 'success' : 'info',
+          actionLabel: 'Ver cuenta',
+          onAction: () => setActiveTab('account')
+        });
+      } catch {
+        setNotice({
+          title: 'Pago en validacion',
+          message: 'Volviste desde Wompi, pero no se pudo consultar el backend. Entra de nuevo a tu cuenta en unos minutos.',
+          tone: 'warning'
+        });
+      }
+    };
+
+    refreshPaymentState();
+  }, [apiToken]);
 
 
   // Derived financial metrics
@@ -245,10 +352,19 @@ export default function App() {
     setTransactions(transactions.filter(t => t.id !== id));
   };
 
-  const handleSaveAccount = (e: React.FormEvent) => {
+  const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!accountName || !accountEmail) return;
-    if (!acceptedTerms) {
+    if (!accountPassword || accountPassword.length < 8) {
+      setNotice({
+        title: 'Contrasena requerida',
+        message: 'Ingresa una contrasena de al menos 8 caracteres para conectar tu cuenta con el backend.',
+        tone: 'warning'
+      });
+      return;
+    }
+
+    if (accountMode === 'register' && !acceptedTerms) {
       setNotice({
         title: 'Aceptacion requerida',
         message: 'Debes aceptar los terminos y condiciones para crear o actualizar tu cuenta.',
@@ -257,39 +373,70 @@ export default function App() {
       return;
     }
 
-    const profile: AccountProfile = {
-      name: accountName.trim(),
-      email: accountEmail.trim().toLowerCase(),
-      phone: accountPhone.trim(),
-      createdAt: accountProfile?.createdAt ?? new Date().toISOString(),
-      acceptedTermsAt: accountProfile?.acceptedTermsAt ?? new Date().toISOString()
-    };
+    try {
+      setIsAccountLoading(true);
+      const profile = accountMode === 'register'
+        ? await registerAccount({
+          name: accountName.trim(),
+          email: accountEmail.trim().toLowerCase(),
+          phone: accountPhone.trim(),
+          password: accountPassword,
+          acceptedTerms,
+        })
+        : await loginAccount(accountEmail.trim().toLowerCase(), accountPassword);
 
-    setAccountProfile(profile);
-    setIsAccountModalOpen(false);
-    setNotice({
-      title: 'Cuenta guardada',
-      message: 'Tus datos quedaron guardados localmente en este dispositivo.',
-      tone: 'success'
-    });
+      setApiTokenState(getApiToken());
+      setAccountProfile(profile);
+      setAccountName(profile.name);
+      setAccountEmail(profile.email);
+      setAccountPhone(profile.phone);
+      setAcceptedTerms(true);
+      setAccountPassword('');
+      setIsAccountModalOpen(false);
+      setNotice({
+        title: accountMode === 'register' ? 'Cuenta creada' : 'Sesion iniciada',
+        message: 'Tu cuenta quedo conectada al backend. El historial se sincronizara automaticamente.',
+        tone: 'success'
+      });
+    } catch (error) {
+      setNotice({
+        title: 'No se pudo conectar la cuenta',
+        message: error instanceof Error ? error.message : 'Revisa los datos e intenta de nuevo.',
+        tone: 'error'
+      });
+    } finally {
+      setIsAccountLoading(false);
+    }
   };
 
-  const handleLogoutAccount = () => {
+  const handleLogoutAccount = async () => {
+    try {
+      await logoutAccount();
+    } catch {
+      clearApiToken();
+    }
+
     localStorage.removeItem('salvaquincena_account');
     localStorage.removeItem('salvaquincena_payments');
     localStorage.removeItem('salvaquincena_ispro');
     localStorage.removeItem('salvaquincena_tx_id');
+    localStorage.removeItem('salvaquincena_pending_payment_reference');
+    localStorage.removeItem('salvaquincena_pending_payment_plan');
+    setApiTokenState('');
+    setIsSyncReady(false);
     setAccountProfile(null);
     setPaymentRecords([]);
     setIsPro(false);
     setAccountName('');
     setAccountEmail('');
     setAccountPhone('');
+    setAccountPassword('');
     setAcceptedTerms(false);
+    setAccountMode('login');
     setIsAccountModalOpen(false);
     setNotice({
       title: 'Sesion cerrada',
-      message: 'Se quitaron los datos de cuenta, pagos asociados y estado PRO de este dispositivo. Tus ingresos, gastos, metas y deudas se conservan.',
+      message: 'Se cerro la sesion de este dispositivo. Tus ingresos, gastos, metas y deudas locales se conservan.',
       tone: 'info'
     });
   };
@@ -360,45 +507,6 @@ export default function App() {
   // Delete Debt
   const handleDeleteDebt = (id: string) => {
     setDebts(debts.filter(d => d.id !== id));
-  };
-
-  const registerApprovedProPayment = (transactionId: string, reference: string, planId: WompiPlanId) => {
-    if (!accountProfile) return;
-
-    const plan = WOMPI_PLANS[planId];
-    const paidAt = new Date();
-    const date = paidAt.toISOString().split('T')[0];
-    const payment: PaymentRecord = {
-      id: transactionId,
-      reference,
-      status: 'APPROVED',
-      amount: plan.amountCop,
-      currency: 'COP',
-      plan: planId,
-      planLabel: plan.label,
-      accountEmail: accountProfile.email,
-      accountName: accountProfile.name,
-      createdAt: paidAt.toISOString()
-    };
-
-    setPaymentRecords((current) => {
-      if (current.some((item) => item.id === transactionId)) return current;
-      return [payment, ...current];
-    });
-
-    setTransactions((current) => {
-      if (current.some((item) => item.paymentId === transactionId)) return current;
-      const paymentTx: Transaction = {
-        id: `payment-${transactionId}`,
-        description: `Pago SalvaQuincena PRO ${plan.label}`,
-        amount: plan.amountCop,
-        type: 'expense',
-        category: 'Servicios',
-        date,
-        paymentId: transactionId
-      };
-      return [paymentTx, ...current];
-    });
   };
 
   // Run simulations
@@ -1121,17 +1229,36 @@ export default function App() {
               </div>
 
               <form onSubmit={handleSaveAccount}>
-                <div className="form-group">
-                  <label className="form-label">Nombre</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={accountName}
-                    onChange={(e) => setAccountName(e.target.value)}
-                    placeholder="Ej. Juan Perez"
-                    required
-                  />
+                <div className="tab-group" style={{ marginBottom: '16px' }}>
+                  <button
+                    type="button"
+                    className={`tab-btn ${accountMode === 'login' ? 'active' : ''}`}
+                    onClick={() => setAccountMode('login')}
+                  >
+                    Entrar
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-btn ${accountMode === 'register' ? 'active' : ''}`}
+                    onClick={() => setAccountMode('register')}
+                  >
+                    Crear cuenta
+                  </button>
                 </div>
+
+                {accountMode === 'register' && (
+                  <div className="form-group">
+                    <label className="form-label">Nombre</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={accountName}
+                      onChange={(e) => setAccountName(e.target.value)}
+                      placeholder="Ej. Juan Perez"
+                      required={accountMode === 'register'}
+                    />
+                  </div>
+                )}
 
                 <div className="form-group">
                   <label className="form-label">Correo</label>
@@ -1146,34 +1273,53 @@ export default function App() {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Celular</label>
+                  <label className="form-label">Contraseña</label>
                   <input
-                    type="tel"
+                    type="password"
                     className="form-input"
-                    value={accountPhone}
-                    onChange={(e) => setAccountPhone(e.target.value)}
-                    placeholder="3001234567"
+                    value={accountPassword}
+                    onChange={(e) => setAccountPassword(e.target.value)}
+                    placeholder="Minimo 8 caracteres"
+                    minLength={8}
+                    required
                   />
                 </div>
 
-                <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                  <input
-                    type="checkbox"
-                    id="account-terms"
-                    checked={acceptedTerms}
-                    onChange={(e) => setAcceptedTerms(e.target.checked)}
-                    style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
-                  />
-                  <label htmlFor="account-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
-                    Acepto los terminos y condiciones, y autorizo guardar mis datos localmente para asociar pagos e historial en este dispositivo.
-                  </label>
-                </div>
+                {accountMode === 'register' && (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Celular</label>
+                      <input
+                        type="tel"
+                        className="form-input"
+                        value={accountPhone}
+                        onChange={(e) => setAccountPhone(e.target.value)}
+                        placeholder="3001234567"
+                      />
+                    </div>
 
-                <button type="submit" className="btn">Guardar Cuenta</button>
+                    <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                      <input
+                        type="checkbox"
+                        id="account-terms"
+                        checked={acceptedTerms}
+                        onChange={(e) => setAcceptedTerms(e.target.checked)}
+                        style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
+                      />
+                      <label htmlFor="account-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
+                        Acepto los terminos y condiciones, y autorizo guardar mis datos en el backend para asociar pagos e historial entre dispositivos.
+                      </label>
+                    </div>
+                  </>
+                )}
+
+                <button type="submit" className="btn" disabled={isAccountLoading}>
+                  {isAccountLoading ? 'Conectando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
+                </button>
               </form>
 
               <div style={{ background: 'var(--bg-color)', borderRadius: '8px', padding: '10px 14px', marginTop: '16px', fontSize: '0.72rem', color: 'var(--text-medium)', border: '1px solid var(--border-color)' }}>
-                Tus datos de cuenta, pagos y estado PRO quedan en el almacenamiento local del navegador. Para recuperarlos en otro equipo se requiere sincronizacion o backend.
+                Tus datos se guardan localmente y se sincronizan con el backend cuando inicias sesion. Asi conservas historial, pagos y estado PRO entre dispositivos.
               </div>
             </div>
 
@@ -1527,17 +1673,36 @@ export default function App() {
             </div>
 
             <form onSubmit={handleSaveAccount}>
-              <div className="form-group">
-                <label className="form-label">Nombre</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={accountName}
-                  onChange={(e) => setAccountName(e.target.value)}
-                  placeholder="Ej. Juan Perez"
-                  required
-                />
+              <div className="tab-group" style={{ marginBottom: '16px' }}>
+                <button
+                  type="button"
+                  className={`tab-btn ${accountMode === 'login' ? 'active' : ''}`}
+                  onClick={() => setAccountMode('login')}
+                >
+                  Entrar
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${accountMode === 'register' ? 'active' : ''}`}
+                  onClick={() => setAccountMode('register')}
+                >
+                  Crear cuenta
+                </button>
               </div>
+
+              {accountMode === 'register' && (
+                <div className="form-group">
+                  <label className="form-label">Nombre</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={accountName}
+                    onChange={(e) => setAccountName(e.target.value)}
+                    placeholder="Ej. Juan Perez"
+                    required={accountMode === 'register'}
+                  />
+                </div>
+              )}
 
               <div className="form-group">
                 <label className="form-label">Correo</label>
@@ -1552,34 +1717,53 @@ export default function App() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Celular</label>
+                <label className="form-label">Contraseña</label>
                 <input
-                  type="tel"
+                  type="password"
                   className="form-input"
-                  value={accountPhone}
-                  onChange={(e) => setAccountPhone(e.target.value)}
-                  placeholder="3001234567"
+                  value={accountPassword}
+                  onChange={(e) => setAccountPassword(e.target.value)}
+                  placeholder="Minimo 8 caracteres"
+                  minLength={8}
+                  required
                 />
               </div>
 
-              <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                <input
-                  type="checkbox"
-                  id="account-modal-terms"
-                  checked={acceptedTerms}
-                  onChange={(e) => setAcceptedTerms(e.target.checked)}
-                  style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
-                />
-                <label htmlFor="account-modal-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
-                  Acepto los terminos y condiciones, y autorizo guardar mis datos localmente para asociar pagos e historial en este dispositivo.
-                </label>
-              </div>
+              {accountMode === 'register' && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Celular</label>
+                    <input
+                      type="tel"
+                      className="form-input"
+                      value={accountPhone}
+                      onChange={(e) => setAccountPhone(e.target.value)}
+                      placeholder="3001234567"
+                    />
+                  </div>
 
-              <button type="submit" className="btn">Guardar Cuenta</button>
+                  <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <input
+                      type="checkbox"
+                      id="account-modal-terms"
+                      checked={acceptedTerms}
+                      onChange={(e) => setAcceptedTerms(e.target.checked)}
+                      style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
+                    />
+                    <label htmlFor="account-modal-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
+                      Acepto los terminos y condiciones, y autorizo guardar mis datos en el backend para asociar pagos e historial entre dispositivos.
+                    </label>
+                  </div>
+                </>
+              )}
+
+              <button type="submit" className="btn" disabled={isAccountLoading}>
+                {isAccountLoading ? 'Conectando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
+              </button>
             </form>
 
             <div style={{ background: 'var(--bg-color)', borderRadius: '8px', padding: '10px 14px', margin: '16px 0', fontSize: '0.72rem', color: 'var(--text-medium)', border: '1px solid var(--border-color)' }}>
-              Tus datos quedan guardados en el almacenamiento local del navegador. Para recuperarlos entre dispositivos se necesita backend o sincronizacion en nube.
+              Tus datos se guardan localmente y se sincronizan con el backend cuando inicias sesion.
             </div>
 
             <button
@@ -1739,12 +1923,12 @@ export default function App() {
                 disabled={isPaymentLoading}
                 style={{ opacity: isPaymentLoading ? 0.7 : 1, cursor: isPaymentLoading ? 'not-allowed' : 'pointer' }}
                 onClick={async () => {
-                  if (!accountProfile) {
+                  if (!accountProfile || !apiToken) {
                     setIsProModalOpen(false);
                     setIsAccountModalOpen(true);
                     setNotice({
                       title: 'Cuenta requerida',
-                      message: 'Primero registra tu cuenta para asociar el pago y conservar el historial local.',
+                      message: 'Primero entra o crea tu cuenta para asociar el pago y conservar el historial en el backend.',
                       tone: 'warning',
                       actionLabel: 'Completar cuenta',
                       onAction: () => setActiveTab('account')
@@ -1754,10 +1938,10 @@ export default function App() {
 
                   try {
                     setIsPaymentLoading(true);
-                    const checkout = await buildWompiCheckoutUrl(selectedProPlan);
+                    const checkout = await createProCheckout(selectedProPlan);
                     localStorage.setItem('salvaquincena_pending_payment_reference', checkout.reference);
                     localStorage.setItem('salvaquincena_pending_payment_plan', selectedProPlan);
-                    window.location.assign(checkout.url);
+                    window.location.assign(checkout.checkoutUrl);
                     setIsPaymentLoading(false);
                   } catch (error) {
                     setIsPaymentLoading(false);
@@ -1765,7 +1949,7 @@ export default function App() {
                       title: 'Error al iniciar pago',
                       message: error instanceof Error
                         ? error.message
-                        : 'No se pudo construir la URL de pago de Wompi. Revisa la configuracion de llaves e intenta de nuevo.',
+                        : 'No se pudo crear el checkout en el backend. Revisa la configuracion de Wompi e intenta de nuevo.',
                       tone: 'error'
                     });
                   }
