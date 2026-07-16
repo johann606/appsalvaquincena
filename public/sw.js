@@ -1,4 +1,4 @@
-const CACHE_NAME = 'salvaquincena-v1';
+const CACHE_NAME = 'salvaquincena-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
