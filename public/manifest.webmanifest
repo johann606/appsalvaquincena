@@ -1,0 +1,33 @@
+{
+  "name": "SalvaQuincena",
+  "short_name": "SalvaQuincena",
+  "description": "Controla ingresos, gastos, metas y deudas desde tu celular.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F8F9FB",
+  "theme_color": "#FF6B00",
+  "categories": ["finance", "productivity"],
+  "lang": "es-CO",
+  "icons": [
+    {
+      "src": "/pwa-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
