@@ -92,8 +92,8 @@ const budgetRates: Record<string, number> = {
   Otros: 0.12
 };
 
-const FREE_GOAL_LIMIT = 2;
-const FREE_DEBT_LIMIT = 3;
+const FREE_GOAL_LIMIT = 5;
+const FREE_DEBT_LIMIT = 8;
 
 type AppNotice = {
   title: string;
