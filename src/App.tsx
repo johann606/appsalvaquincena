@@ -335,7 +335,24 @@ export default function App() {
 
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!accountName || !accountEmail) return;
+    if (!accountEmail) {
+      setNotice({
+        title: 'Correo requerido',
+        message: 'Ingresa el correo de tu cuenta para continuar.',
+        tone: 'warning'
+      });
+      return;
+    }
+
+    if (accountMode === 'register' && !accountName) {
+      setNotice({
+        title: 'Nombre requerido',
+        message: 'Ingresa tu nombre para crear la cuenta.',
+        tone: 'warning'
+      });
+      return;
+    }
+
     if (!accountPassword || accountPassword.length < 8) {
       setNotice({
         title: 'Contrasena requerida',
@@ -580,7 +597,7 @@ export default function App() {
   const hasActiveSession = Boolean(accountProfile && apiToken);
 
   const renderAccountForm = () => (
-    <form onSubmit={handleSaveAccount}>
+    <form onSubmit={handleSaveAccount} noValidate>
       <div className="tab-group" style={{ marginBottom: '16px' }}>
         <button
           type="button"
