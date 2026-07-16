@@ -99,10 +99,16 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch {
+    throw new Error('No pudimos conectar con tu cuenta. Revisa tu conexion o intenta de nuevo en unos minutos.');
+  }
 
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('application/json') ? await response.json() : await response.text();

@@ -577,7 +577,136 @@ export default function App() {
   ));
   const financialHealthLabel = financialHealthScore >= 75 ? 'Bien' : financialHealthScore >= 50 ? 'Alerta' : 'Crítico';
   const emergencyMode = emergencyReasons.length > 0;
+  const hasActiveSession = Boolean(accountProfile && apiToken);
 
+  const renderAccountForm = () => (
+    <form onSubmit={handleSaveAccount}>
+      <div className="tab-group" style={{ marginBottom: '16px' }}>
+        <button
+          type="button"
+          className={`tab-btn ${accountMode === 'login' ? 'active' : ''}`}
+          onClick={() => setAccountMode('login')}
+        >
+          Entrar
+        </button>
+        <button
+          type="button"
+          className={`tab-btn ${accountMode === 'register' ? 'active' : ''}`}
+          onClick={() => setAccountMode('register')}
+        >
+          Crear cuenta
+        </button>
+      </div>
+
+      {accountMode === 'register' && (
+        <div className="form-group">
+          <label className="form-label">Nombre</label>
+          <input
+            type="text"
+            className="form-input"
+            value={accountName}
+            onChange={(e) => setAccountName(e.target.value)}
+            placeholder="Ej. Juan Perez"
+            required={accountMode === 'register'}
+          />
+        </div>
+      )}
+
+      <div className="form-group">
+        <label className="form-label">Correo</label>
+        <input
+          type="email"
+          className="form-input"
+          value={accountEmail}
+          onChange={(e) => setAccountEmail(e.target.value)}
+          placeholder="correo@ejemplo.com"
+          required
+        />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Contrasena</label>
+        <input
+          type="password"
+          className="form-input"
+          value={accountPassword}
+          onChange={(e) => setAccountPassword(e.target.value)}
+          placeholder="Minimo 8 caracteres"
+          minLength={8}
+          required
+        />
+      </div>
+
+      {accountMode === 'register' && (
+        <>
+          <div className="form-group">
+            <label className="form-label">Celular</label>
+            <input
+              type="tel"
+              className="form-input"
+              value={accountPhone}
+              onChange={(e) => setAccountPhone(e.target.value)}
+              placeholder="3001234567"
+            />
+          </div>
+
+          <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+            <input
+              type="checkbox"
+              id="account-terms"
+              checked={acceptedTerms}
+              onChange={(e) => setAcceptedTerms(e.target.checked)}
+              style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
+            />
+            <label htmlFor="account-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
+              Acepto los terminos y condiciones, y autorizo guardar mis datos para conservar mi historial y asociar mis pagos.
+            </label>
+          </div>
+        </>
+      )}
+
+      <button type="submit" className="btn" disabled={isAccountLoading}>
+        {isAccountLoading ? 'Procesando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
+      </button>
+    </form>
+  );
+
+  const renderAccountProfile = () => (
+    <div style={{ borderLeft: '4px solid #2ecc71', background: 'linear-gradient(135deg, #F5FCF8, #FFFFFF)', borderRadius: '8px', padding: '14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+        <div className="item-icon-wrapper icon-income">
+          <User size={20} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-dark)' }}>
+            {accountProfile?.name || 'Mi cuenta'}
+          </h3>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-medium)', overflowWrap: 'anywhere' }}>
+            {accountProfile?.email}
+          </p>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+        <div className="sim-box highlight">
+          <p>Plan</p>
+          <h4>{isPro ? 'PRO' : 'Gratis'}</h4>
+        </div>
+        <div className="sim-box">
+          <p>Pagos</p>
+          <h4>{paymentRecords.length}</h4>
+        </div>
+      </div>
+
+      <p style={{ fontSize: '0.78rem', color: 'var(--text-medium)', marginBottom: '14px' }}>
+        Tus movimientos se guardan en tu cuenta y puedes consultarlos despues.
+      </p>
+
+      <button className="btn btn-outline" onClick={handleLogoutAccount}>
+        Cerrar sesion
+      </button>
+    </div>
+  );
 
   return (
     <>
@@ -1209,99 +1338,13 @@ export default function App() {
                 <User size={18} style={{ color: 'var(--primary-orange)' }} /> Datos de cuenta
               </div>
 
-              <form onSubmit={handleSaveAccount}>
-                <div className="tab-group" style={{ marginBottom: '16px' }}>
-                  <button
-                    type="button"
-                    className={`tab-btn ${accountMode === 'login' ? 'active' : ''}`}
-                    onClick={() => setAccountMode('login')}
-                  >
-                    Entrar
-                  </button>
-                  <button
-                    type="button"
-                    className={`tab-btn ${accountMode === 'register' ? 'active' : ''}`}
-                    onClick={() => setAccountMode('register')}
-                  >
-                    Crear cuenta
-                  </button>
+              {hasActiveSession ? renderAccountProfile() : renderAccountForm()}
+
+              {!hasActiveSession && (
+                <div style={{ background: 'var(--bg-color)', borderRadius: '8px', padding: '10px 14px', marginTop: '16px', fontSize: '0.72rem', color: 'var(--text-medium)', border: '1px solid var(--border-color)' }}>
+                  Al entrar con tu cuenta, tus movimientos y pagos quedan disponibles para futuras consultas.
                 </div>
-
-                {accountMode === 'register' && (
-                  <div className="form-group">
-                    <label className="form-label">Nombre</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={accountName}
-                      onChange={(e) => setAccountName(e.target.value)}
-                      placeholder="Ej. Juan Perez"
-                      required={accountMode === 'register'}
-                    />
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label">Correo</label>
-                  <input
-                    type="email"
-                    className="form-input"
-                    value={accountEmail}
-                    onChange={(e) => setAccountEmail(e.target.value)}
-                    placeholder="correo@ejemplo.com"
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Contraseña</label>
-                  <input
-                    type="password"
-                    className="form-input"
-                    value={accountPassword}
-                    onChange={(e) => setAccountPassword(e.target.value)}
-                    placeholder="Minimo 8 caracteres"
-                    minLength={8}
-                    required
-                  />
-                </div>
-
-                {accountMode === 'register' && (
-                  <>
-                    <div className="form-group">
-                      <label className="form-label">Celular</label>
-                      <input
-                        type="tel"
-                        className="form-input"
-                        value={accountPhone}
-                        onChange={(e) => setAccountPhone(e.target.value)}
-                        placeholder="3001234567"
-                      />
-                    </div>
-
-                    <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                      <input
-                        type="checkbox"
-                        id="account-terms"
-                        checked={acceptedTerms}
-                        onChange={(e) => setAcceptedTerms(e.target.checked)}
-                        style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
-                      />
-                      <label htmlFor="account-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
-                        Acepto los terminos y condiciones, y autorizo guardar mis datos para conservar mi historial y asociar mis pagos.
-                      </label>
-                    </div>
-                  </>
-                )}
-
-                <button type="submit" className="btn" disabled={isAccountLoading}>
-                  {isAccountLoading ? 'Procesando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
-                </button>
-              </form>
-
-              <div style={{ background: 'var(--bg-color)', borderRadius: '8px', padding: '10px 14px', marginTop: '16px', fontSize: '0.72rem', color: 'var(--text-medium)', border: '1px solid var(--border-color)' }}>
-                Al entrar con tu cuenta, tus movimientos y pagos quedan disponibles para futuras consultas.
-              </div>
+              )}
             </div>
 
             <button
@@ -1328,15 +1371,6 @@ export default function App() {
             >
               Descargar respaldo
             </button>
-
-            {accountProfile && (
-              <button
-                className="btn btn-outline"
-                onClick={handleLogoutAccount}
-              >
-                Cerrar sesión
-              </button>
-            )}
 
             <div className="card">
               <div className="card-title">
@@ -1653,99 +1687,13 @@ export default function App() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveAccount}>
-              <div className="tab-group" style={{ marginBottom: '16px' }}>
-                <button
-                  type="button"
-                  className={`tab-btn ${accountMode === 'login' ? 'active' : ''}`}
-                  onClick={() => setAccountMode('login')}
-                >
-                  Entrar
-                </button>
-                <button
-                  type="button"
-                  className={`tab-btn ${accountMode === 'register' ? 'active' : ''}`}
-                  onClick={() => setAccountMode('register')}
-                >
-                  Crear cuenta
-                </button>
+            {hasActiveSession ? renderAccountProfile() : renderAccountForm()}
+
+            {!hasActiveSession && (
+              <div style={{ background: 'var(--bg-color)', borderRadius: '8px', padding: '10px 14px', margin: '16px 0', fontSize: '0.72rem', color: 'var(--text-medium)', border: '1px solid var(--border-color)' }}>
+                Al entrar con tu cuenta, tus movimientos y pagos quedan disponibles para futuras consultas.
               </div>
-
-              {accountMode === 'register' && (
-                <div className="form-group">
-                  <label className="form-label">Nombre</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={accountName}
-                    onChange={(e) => setAccountName(e.target.value)}
-                    placeholder="Ej. Juan Perez"
-                    required={accountMode === 'register'}
-                  />
-                </div>
-              )}
-
-              <div className="form-group">
-                <label className="form-label">Correo</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  value={accountEmail}
-                  onChange={(e) => setAccountEmail(e.target.value)}
-                  placeholder="correo@ejemplo.com"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Contraseña</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  value={accountPassword}
-                  onChange={(e) => setAccountPassword(e.target.value)}
-                  placeholder="Minimo 8 caracteres"
-                  minLength={8}
-                  required
-                />
-              </div>
-
-              {accountMode === 'register' && (
-                <>
-                  <div className="form-group">
-                    <label className="form-label">Celular</label>
-                    <input
-                      type="tel"
-                      className="form-input"
-                      value={accountPhone}
-                      onChange={(e) => setAccountPhone(e.target.value)}
-                      placeholder="3001234567"
-                    />
-                  </div>
-
-                  <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                    <input
-                      type="checkbox"
-                      id="account-modal-terms"
-                      checked={acceptedTerms}
-                      onChange={(e) => setAcceptedTerms(e.target.checked)}
-                      style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
-                    />
-                    <label htmlFor="account-modal-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
-                      Acepto los terminos y condiciones, y autorizo guardar mis datos para conservar mi historial y asociar mis pagos.
-                    </label>
-                  </div>
-                </>
-              )}
-
-              <button type="submit" className="btn" disabled={isAccountLoading}>
-                {isAccountLoading ? 'Procesando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
-              </button>
-            </form>
-
-            <div style={{ background: 'var(--bg-color)', borderRadius: '8px', padding: '10px 14px', margin: '16px 0', fontSize: '0.72rem', color: 'var(--text-medium)', border: '1px solid var(--border-color)' }}>
-              Al entrar con tu cuenta, tus movimientos y pagos quedan disponibles para futuras consultas.
-            </div>
+            )}
 
             <button
               className="btn btn-secondary"
@@ -1772,16 +1720,6 @@ export default function App() {
             >
               Descargar respaldo
             </button>
-
-            {accountProfile && (
-              <button
-                className="btn btn-outline"
-                style={{ marginBottom: '16px' }}
-                onClick={handleLogoutAccount}
-              >
-                Cerrar sesión
-              </button>
-            )}
 
             <div className="card-title" style={{ fontSize: '0.95rem' }}>Pagos asociados</div>
             <div className="list-container">
