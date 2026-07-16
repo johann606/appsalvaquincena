@@ -105,30 +105,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'transactions' | 'savings' | 'debts' | 'account'>('home');
 
   // Core Data States (hydrated from localStorage)
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('salvaquincena_transactions');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', description: 'Salario Quincena', amount: 2200000, type: 'income', category: 'Salario', date: '2026-07-15' },
-      { id: '2', description: 'Arriendo', amount: 850000, type: 'expense', category: 'Vivienda', date: '2026-07-02' },
-      { id: '3', description: 'Mercado Carulla', amount: 350000, type: 'expense', category: 'Alimentación', date: '2026-07-10' }
-    ];
-  });
+  const [transactions, setTransactions] = useState<Transaction[]>(() => readLocalJson<Transaction[]>('salvaquincena_transactions', []));
 
-  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() => {
-    const saved = localStorage.getItem('salvaquincena_savings');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', name: 'Viaje a San Andrés', targetAmount: 2500000, currentAmount: 800000, targetDate: '2026-12-15' }
-    ];
-  });
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() => readLocalJson<SavingsGoal[]>('salvaquincena_savings', []));
 
-  const [debts, setDebts] = useState<Debt[]>(() => {
-    const saved = localStorage.getItem('salvaquincena_debts');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', name: 'Tarjeta de Crédito Bancolombia', balance: 3500000, interestRate: 28.5, minimumPayment: 150000, isAdvanced: true },
-      { id: '2', name: 'Préstamo Libre Inversión', balance: 8000000, interestRate: 18.2, minimumPayment: 320000, isAdvanced: true },
-      { id: '3', name: 'Deuda Familiar (Mamá)', balance: 1200000, interestRate: 0, minimumPayment: 100000, isAdvanced: false }
-    ];
-  });
+  const [debts, setDebts] = useState<Debt[]>(() => readLocalJson<Debt[]>('salvaquincena_debts', []));
 
   // Pro Subscription States
   const [isPro, setIsPro] = useState<boolean>(() => localStorage.getItem('salvaquincena_ispro') === 'true');
@@ -271,8 +252,8 @@ export default function App() {
         setIsPro(synced.isPro);
       } catch {
         setNotice({
-          title: 'Sincronizacion pendiente',
-          message: 'No se pudo guardar en el backend en este momento. Tus datos siguen guardados localmente y se reintentara cuando vuelvas a cambiar algo.',
+          title: 'Guardado pendiente',
+          message: 'No pudimos guardar tus cambios en tu cuenta en este momento. Siguen protegidos en este celular y volveremos a intentarlo.',
           tone: 'warning'
         });
       }
@@ -300,18 +281,18 @@ export default function App() {
         localStorage.removeItem('salvaquincena_pending_payment_plan');
         window.history.replaceState({}, document.title, window.location.pathname);
         setNotice({
-          title: proActive ? 'Pago aprobado' : 'Pago en validacion',
+          title: proActive ? 'Pago aprobado' : 'Estamos confirmando tu pago',
           message: proActive
             ? 'Wompi confirmo el pago y tu plan PRO quedo activo en tu cuenta.'
-            : 'Wompi recibio el pago. Si aun no aparece activo, espera unos minutos mientras llega la confirmacion del webhook.',
+            : 'Wompi recibio la transaccion. Si aun no ves PRO activo, espera unos minutos y vuelve a entrar a tu cuenta.',
           tone: proActive ? 'success' : 'info',
           actionLabel: 'Ver cuenta',
           onAction: () => setActiveTab('account')
         });
       } catch {
         setNotice({
-          title: 'Pago en validacion',
-          message: 'Volviste desde Wompi, pero no se pudo consultar el backend. Entra de nuevo a tu cuenta en unos minutos.',
+          title: 'Estamos confirmando tu pago',
+          message: 'Volviste desde Wompi, pero no pudimos actualizar tu cuenta todavia. Intenta entrar de nuevo en unos minutos.',
           tone: 'warning'
         });
       }
@@ -358,7 +339,7 @@ export default function App() {
     if (!accountPassword || accountPassword.length < 8) {
       setNotice({
         title: 'Contrasena requerida',
-        message: 'Ingresa una contrasena de al menos 8 caracteres para conectar tu cuenta con el backend.',
+        message: 'Ingresa una contrasena de al menos 8 caracteres para proteger tu cuenta.',
         tone: 'warning'
       });
       return;
@@ -395,7 +376,7 @@ export default function App() {
       setIsAccountModalOpen(false);
       setNotice({
         title: accountMode === 'register' ? 'Cuenta creada' : 'Sesion iniciada',
-        message: 'Tu cuenta quedo conectada al backend. El historial se sincronizara automaticamente.',
+        message: 'Tu cuenta quedo lista. Tus movimientos se guardaran para que puedas consultarlos despues.',
         tone: 'success'
       });
     } catch (error) {
@@ -436,7 +417,7 @@ export default function App() {
     setIsAccountModalOpen(false);
     setNotice({
       title: 'Sesion cerrada',
-      message: 'Se cerro la sesion de este dispositivo. Tus ingresos, gastos, metas y deudas locales se conservan.',
+      message: 'Saliste de tu cuenta. Tus movimientos guardados se conservan.',
       tone: 'info'
     });
   };
@@ -674,7 +655,7 @@ export default function App() {
                 <div style={{ textAlign: 'right' }}>
                   <span className="badge badge-orange">{debts.length} Deudas</span>
                   <p style={{ fontSize: '0.7rem', color: 'var(--primary-orange)', marginTop: '6px', fontWeight: 600 }}>
-                    Ver Simulación de Pagos →
+                    {debts.length > 0 ? 'Ver plan de pagos' : 'Registrar deuda'}
                   </p>
                 </div>
               </div>
@@ -702,7 +683,7 @@ export default function App() {
                 ))}
                 {transactions.length === 0 && (
                   <p style={{ textAlign: 'center', color: 'var(--text-light)', fontSize: '0.85rem', padding: '20px 0' }}>
-                    No tienes transacciones registradas.
+                    Aun no has registrado movimientos. Agrega tu primer ingreso o gasto para ver tu balance real.
                   </p>
                 )}
               </div>
@@ -714,7 +695,7 @@ export default function App() {
         {activeTab === 'transactions' && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>Historial de Transacciones</h2>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>Mis movimientos</h2>
               <button className="btn" style={{ width: 'auto', padding: '8px 16px' }} onClick={() => setIsTxModalOpen(true)}>
                 <Plus size={16} /> Añadir
               </button>
@@ -769,7 +750,7 @@ export default function App() {
               ))}
               {transactions.length === 0 && (
                 <p style={{ textAlign: 'center', color: 'var(--text-light)', fontSize: '0.85rem', padding: '40px 0' }}>
-                  No hay transacciones guardadas. Usa el botón "Añadir".
+                  Empieza registrando tu primer ingreso o gasto.
                 </p>
               )}
             </div>
@@ -835,7 +816,7 @@ export default function App() {
               })}
               {savingsGoals.length === 0 && (
                 <p style={{ textAlign: 'center', color: 'var(--text-light)', fontSize: '0.85rem', padding: '40px 0' }}>
-                  No tienes metas creadas. Empieza a ahorrar hoy.
+                  Crea una meta y mira cuanto necesitas ahorrar en cada quincena.
                 </p>
               )}
             </div>
@@ -878,7 +859,7 @@ export default function App() {
                   {debt.isAdvanced && (
                     <div className="debt-details-grid">
                       <div className="debt-detail-item">
-                        <p>Tasa (TEA)</p>
+                        <p>Interes anual</p>
                         <h5>{debt.interestRate}%</h5>
                       </div>
                       <div className="debt-detail-item">
@@ -895,7 +876,7 @@ export default function App() {
               ))}
               {debts.length === 0 && (
                 <p style={{ textAlign: 'center', color: 'var(--text-light)', fontSize: '0.85rem', padding: '20px 0' }}>
-                  ¡Felicidades! No tienes deudas registradas.
+                  Si tienes deudas, registralas para organizar un plan de pago.
                 </p>
               )}
             </div>
@@ -1307,19 +1288,19 @@ export default function App() {
                         style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
                       />
                       <label htmlFor="account-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
-                        Acepto los terminos y condiciones, y autorizo guardar mis datos en el backend para asociar pagos e historial entre dispositivos.
+                        Acepto los terminos y condiciones, y autorizo guardar mis datos para conservar mi historial y asociar mis pagos.
                       </label>
                     </div>
                   </>
                 )}
 
                 <button type="submit" className="btn" disabled={isAccountLoading}>
-                  {isAccountLoading ? 'Conectando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
+                  {isAccountLoading ? 'Procesando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
                 </button>
               </form>
 
               <div style={{ background: 'var(--bg-color)', borderRadius: '8px', padding: '10px 14px', marginTop: '16px', fontSize: '0.72rem', color: 'var(--text-medium)', border: '1px solid var(--border-color)' }}>
-                Tus datos se guardan localmente y se sincronizan con el backend cuando inicias sesion. Asi conservas historial, pagos y estado PRO entre dispositivos.
+                Al entrar con tu cuenta, tus movimientos y pagos quedan disponibles para futuras consultas.
               </div>
             </div>
 
@@ -1601,7 +1582,7 @@ export default function App() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Monto Total Ovejado (COP)</label>
+                <label className="form-label">Monto total adeudado (COP)</label>
                 <input 
                   type="number" 
                   className="form-input" 
@@ -1621,14 +1602,14 @@ export default function App() {
                   style={{ width: '18px', height: '18px', accentColor: 'var(--primary-orange)' }}
                 />
                 <label htmlFor="advanced-check" style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-medium)', cursor: 'pointer' }}>
-                  Habilitar parametrización avanzada (Tasa y Plazo)
+                  Agregar intereses y pago minimo
                 </label>
               </div>
 
               {debtIsAdvanced && (
                 <div className="form-row">
                   <div className="form-group">
-                    <label className="form-label">Tasa Efectiva Anual (TEA %)</label>
+                    <label className="form-label">Interes anual (%)</label>
                     <input 
                       type="number" 
                       step="0.01"
@@ -1751,19 +1732,19 @@ export default function App() {
                       style={{ width: '18px', height: '18px', marginTop: '2px', accentColor: 'var(--primary-orange)' }}
                     />
                     <label htmlFor="account-modal-terms" style={{ fontSize: '0.78rem', color: 'var(--text-medium)', lineHeight: 1.35, cursor: 'pointer' }}>
-                      Acepto los terminos y condiciones, y autorizo guardar mis datos en el backend para asociar pagos e historial entre dispositivos.
+                      Acepto los terminos y condiciones, y autorizo guardar mis datos para conservar mi historial y asociar mis pagos.
                     </label>
                   </div>
                 </>
               )}
 
               <button type="submit" className="btn" disabled={isAccountLoading}>
-                {isAccountLoading ? 'Conectando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
+                {isAccountLoading ? 'Procesando...' : accountMode === 'register' ? 'Crear Cuenta' : 'Entrar'}
               </button>
             </form>
 
             <div style={{ background: 'var(--bg-color)', borderRadius: '8px', padding: '10px 14px', margin: '16px 0', fontSize: '0.72rem', color: 'var(--text-medium)', border: '1px solid var(--border-color)' }}>
-              Tus datos se guardan localmente y se sincronizan con el backend cuando inicias sesion.
+              Al entrar con tu cuenta, tus movimientos y pagos quedan disponibles para futuras consultas.
             </div>
 
             <button
@@ -1928,7 +1909,7 @@ export default function App() {
                     setIsAccountModalOpen(true);
                     setNotice({
                       title: 'Cuenta requerida',
-                      message: 'Primero entra o crea tu cuenta para asociar el pago y conservar el historial en el backend.',
+                      message: 'Primero entra o crea tu cuenta para asociar el pago y conservar tu historial.',
                       tone: 'warning',
                       actionLabel: 'Completar cuenta',
                       onAction: () => setActiveTab('account')
@@ -1949,7 +1930,7 @@ export default function App() {
                       title: 'Error al iniciar pago',
                       message: error instanceof Error
                         ? error.message
-                        : 'No se pudo crear el checkout en el backend. Revisa la configuracion de Wompi e intenta de nuevo.',
+                        : 'No pudimos iniciar el pago. Intenta nuevamente en unos segundos.',
                       tone: 'error'
                     });
                   }
