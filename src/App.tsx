@@ -17,12 +17,16 @@ import {
   AlertTriangle,
   BarChart3,
   Target,
-  ShieldCheck
+  ShieldCheck,
+  MessageCircle,
+  Send
 } from 'lucide-react';
 import { Transaction, SavingsGoal, Debt, AccountProfile, PaymentRecord } from './types';
 import { runDebtSimulation, teaToTem } from './utils/debtCalculator';
 import { WOMPI_PLANS, WompiPlanId } from './utils/wompi';
 import {
+  AdvisorMessage,
+  askFinancialAdvisor,
   clearApiToken,
   createProCheckout,
   fetchCurrentAccount,
@@ -166,6 +170,14 @@ export default function App() {
   const [apiToken, setApiTokenState] = useState(() => getApiToken());
   const [isAccountLoading, setIsAccountLoading] = useState(false);
   const [isSyncReady, setIsSyncReady] = useState(false);
+  const [advisorMessages, setAdvisorMessages] = useState<AdvisorMessage[]>([
+    {
+      role: 'assistant',
+      content: 'Hola, soy tu asesor PRO. Puedo ayudarte a decidir qué pagar primero, cuánto puedes gastar o cómo ajustar tus metas.'
+    }
+  ]);
+  const [advisorInput, setAdvisorInput] = useState('');
+  const [isAdvisorLoading, setIsAdvisorLoading] = useState(false);
 
   const clearFinancialData = () => {
     localStorage.setItem('salvaquincena_transactions', '[]');
@@ -473,11 +485,53 @@ export default function App() {
     setAcceptedTerms(false);
     setAccountMode('login');
     setIsAccountModalOpen(false);
+    setAdvisorMessages([
+      {
+        role: 'assistant',
+        content: 'Hola, soy tu asesor PRO. Puedo ayudarte a decidir qué pagar primero, cuánto puedes gastar o cómo ajustar tus metas.'
+      }
+    ]);
     setNotice({
       title: 'Sesion cerrada',
       message: 'Saliste de tu cuenta. Tus movimientos guardados se conservan.',
       tone: 'info'
     });
+  };
+
+  const handleAskAdvisor = async (question?: string) => {
+    const message = (question ?? advisorInput).trim();
+    if (!message || isAdvisorLoading) return;
+
+    if (!isPro) {
+      setIsProModalOpen(true);
+      setNotice({
+        title: 'Asesor PRO',
+        message: 'El chat financiero con IA está incluido en SalvaQuincena PRO.',
+        tone: 'info',
+        actionLabel: 'Ver PRO',
+        onAction: () => setIsProModalOpen(true)
+      });
+      return;
+    }
+
+    const userMessage: AdvisorMessage = { role: 'user', content: message };
+    const nextMessages = [...advisorMessages, userMessage];
+    setAdvisorMessages(nextMessages);
+    setAdvisorInput('');
+
+    try {
+      setIsAdvisorLoading(true);
+      const reply = await askFinancialAdvisor(message, advisorMessages);
+      setAdvisorMessages([...nextMessages, { role: 'assistant', content: reply }]);
+    } catch (error) {
+      setNotice({
+        title: 'Asesor no disponible',
+        message: error instanceof Error ? error.message : 'No pudimos responder tu pregunta. Intenta de nuevo en unos minutos.',
+        tone: 'warning'
+      });
+    } finally {
+      setIsAdvisorLoading(false);
+    }
   };
 
   // Add Savings Goal Handler
@@ -1260,6 +1314,96 @@ export default function App() {
 
             {isPro && (
               <>
+                <div className="card">
+                  <div className="card-title">
+                    <MessageCircle size={18} style={{ color: 'var(--primary-orange)' }} /> Asesor financiero PRO
+                  </div>
+                  <div style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px', maxHeight: '320px', overflowY: 'auto', marginBottom: '12px' }}>
+                    {advisorMessages.map((message, index) => (
+                      <div
+                        key={`${message.role}-${index}`}
+                        style={{
+                          display: 'flex',
+                          justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
+                          marginBottom: '10px'
+                        }}
+                      >
+                        <div
+                          style={{
+                            maxWidth: '88%',
+                            borderRadius: '12px',
+                            padding: '10px 12px',
+                            background: message.role === 'user' ? 'var(--primary-orange)' : '#fff',
+                            color: message.role === 'user' ? '#fff' : 'var(--text-medium)',
+                            border: message.role === 'user' ? 'none' : '1px solid var(--border-color)',
+                            fontSize: '0.8rem',
+                            lineHeight: 1.45,
+                            whiteSpace: 'pre-wrap'
+                          }}
+                        >
+                          {message.content}
+                        </div>
+                      </div>
+                    ))}
+                    {isAdvisorLoading && (
+                      <p style={{ color: 'var(--text-light)', fontSize: '0.78rem', padding: '4px 0' }}>
+                        Preparando respuesta...
+                      </p>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                    {[
+                      '¿Qué deuda pago primero?',
+                      '¿Cuánto puedo gastar hoy?',
+                      'Hazme un plan para llegar a mis metas'
+                    ].map((question) => (
+                      <button
+                        key={question}
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ width: 'auto', padding: '7px 10px', fontSize: '0.72rem' }}
+                        disabled={isAdvisorLoading}
+                        onClick={() => handleAskAdvisor(question)}
+                      >
+                        {question}
+                      </button>
+                    ))}
+                  </div>
+
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleAskAdvisor();
+                    }}
+                    style={{ display: 'flex', gap: '8px' }}
+                  >
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={advisorInput}
+                      onChange={(e) => setAdvisorInput(e.target.value)}
+                      placeholder="Pregúntale a tu asesor financiero"
+                      disabled={isAdvisorLoading}
+                      maxLength={800}
+                      style={{ marginBottom: 0 }}
+                    />
+                    <button
+                      type="submit"
+                      className="btn"
+                      disabled={isAdvisorLoading || !advisorInput.trim()}
+                      style={{ width: '48px', minWidth: '48px', padding: 0 }}
+                      aria-label="Enviar pregunta"
+                    >
+                      <Send size={18} />
+                    </button>
+                  </form>
+
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-light)', marginTop: '10px', lineHeight: 1.35 }}>
+                    Orientación general, no reemplaza asesoría profesional.
+                  </p>
+                </div>
+
                 <div className="card" style={{ borderTop: `4px solid ${financialHealthScore >= 75 ? '#2ecc71' : financialHealthScore >= 50 ? 'var(--primary-orange)' : '#e74c3c'}` }}>
                   <div className="card-title">
                     <ShieldCheck size={18} style={{ color: financialHealthScore >= 75 ? '#2ecc71' : 'var(--primary-orange)' }} /> Diagnóstico financiero

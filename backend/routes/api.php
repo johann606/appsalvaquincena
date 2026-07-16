@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\FinancialAdvisorController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\WompiWebhookController;
@@ -17,4 +18,5 @@ Route::middleware(['auth:sanctum', 'throttle:90,1'])->group(function () {
     Route::post('/sync', [SyncController::class, 'store']);
     Route::get('/subscription', [SubscriptionController::class, 'show']);
     Route::post('/subscription/checkout', [SubscriptionController::class, 'checkout'])->middleware('throttle:10,1');
+    Route::post('/advisor/chat', FinancialAdvisorController::class)->middleware('throttle:20,1');
 });

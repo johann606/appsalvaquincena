@@ -77,6 +77,11 @@ export type SyncResult = {
   subscriptionPlan: string | null;
 };
 
+export type AdvisorMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 export function getApiToken(): string {
   return localStorage.getItem(TOKEN_KEY) || '';
 }
@@ -300,4 +305,16 @@ export async function createProCheckout(plan: WompiPlanId): Promise<{ reference:
     reference: response.reference,
     checkoutUrl: response.checkout_url,
   };
+}
+
+export async function askFinancialAdvisor(message: string, history: AdvisorMessage[]): Promise<string> {
+  const response = await apiRequest<{ reply: string }>('/api/advisor/chat', {
+    method: 'POST',
+    body: JSON.stringify({
+      message,
+      history: history.slice(-8),
+    }),
+  });
+
+  return response.reply;
 }
