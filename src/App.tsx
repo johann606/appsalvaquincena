@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Home, 
   ArrowDownLeft, 
@@ -92,6 +92,9 @@ const budgetRates: Record<string, number> = {
   Otros: 0.12
 };
 
+const FREE_GOAL_LIMIT = 2;
+const FREE_DEBT_LIMIT = 3;
+
 type AppNotice = {
   title: string;
   message: string;
@@ -101,6 +104,7 @@ type AppNotice = {
 };
 
 export default function App() {
+  const justRegisteredRef = useRef(false);
   // Navigation State
   const [activeTab, setActiveTab] = useState<'home' | 'transactions' | 'savings' | 'debts' | 'account'>('home');
 
@@ -113,6 +117,7 @@ export default function App() {
 
   // Pro Subscription States
   const [isPro, setIsPro] = useState<boolean>(() => localStorage.getItem('salvaquincena_ispro') === 'true');
+  const [subscriptionEndsAt, setSubscriptionEndsAt] = useState<string | null>(null);
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
   const [notice, setNotice] = useState<AppNotice | null>(null);
@@ -161,6 +166,22 @@ export default function App() {
   const [apiToken, setApiTokenState] = useState(() => getApiToken());
   const [isAccountLoading, setIsAccountLoading] = useState(false);
   const [isSyncReady, setIsSyncReady] = useState(false);
+
+  const clearFinancialData = () => {
+    localStorage.setItem('salvaquincena_transactions', '[]');
+    localStorage.setItem('salvaquincena_savings', '[]');
+    localStorage.setItem('salvaquincena_debts', '[]');
+    localStorage.setItem('salvaquincena_payments', '[]');
+    localStorage.setItem('salvaquincena_ispro', 'false');
+    localStorage.removeItem('salvaquincena_pending_payment_reference');
+    localStorage.removeItem('salvaquincena_pending_payment_plan');
+    setTransactions([]);
+    setSavingsGoals([]);
+    setDebts([]);
+    setPaymentRecords([]);
+    setIsPro(false);
+    setSubscriptionEndsAt(null);
+  };
 
   // Synchronize with localStorage
   useEffect(() => {
@@ -213,10 +234,19 @@ export default function App() {
         setAcceptedTerms(Boolean(profile.acceptedTermsAt));
         setPaymentRecords(remote.payments);
         setIsPro(remote.isPro);
+        setSubscriptionEndsAt(remote.subscriptionEndsAt);
 
         const hasRemoteData = remote.transactions.length > 0 || remote.savingsGoals.length > 0 || remote.debts.length > 0;
 
-        if (hasRemoteData) {
+        if (justRegisteredRef.current) {
+          justRegisteredRef.current = false;
+          clearFinancialData();
+          const synced = await pushSync({ transactions: [], savingsGoals: [], debts: [] });
+          if (cancelled) return;
+          setPaymentRecords(synced.payments);
+          setIsPro(synced.isPro);
+          setSubscriptionEndsAt(synced.subscriptionEndsAt);
+        } else if (hasRemoteData) {
           setTransactions(remote.transactions);
           setSavingsGoals(remote.savingsGoals);
           setDebts(remote.debts);
@@ -225,6 +255,7 @@ export default function App() {
           if (cancelled) return;
           setPaymentRecords(synced.payments);
           setIsPro(synced.isPro);
+          setSubscriptionEndsAt(synced.subscriptionEndsAt);
         }
 
         setIsSyncReady(true);
@@ -250,6 +281,7 @@ export default function App() {
         const synced = await pushSync({ transactions, savingsGoals, debts });
         setPaymentRecords(synced.payments);
         setIsPro(synced.isPro);
+        setSubscriptionEndsAt(synced.subscriptionEndsAt);
       } catch {
         setNotice({
           title: 'Guardado pendiente',
@@ -277,6 +309,7 @@ export default function App() {
         ]);
         setIsPro(proActive);
         setPaymentRecords(remote.payments);
+        setSubscriptionEndsAt(remote.subscriptionEndsAt);
         localStorage.removeItem('salvaquincena_pending_payment_reference');
         localStorage.removeItem('salvaquincena_pending_payment_plan');
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -383,6 +416,11 @@ export default function App() {
         })
         : await loginAccount(accountEmail.trim().toLowerCase(), accountPassword);
 
+      if (accountMode === 'register') {
+        justRegisteredRef.current = true;
+        clearFinancialData();
+      }
+
       setApiTokenState(getApiToken());
       setAccountProfile(profile);
       setAccountName(profile.name);
@@ -393,7 +431,9 @@ export default function App() {
       setIsAccountModalOpen(false);
       setNotice({
         title: accountMode === 'register' ? 'Cuenta creada' : 'Sesion iniciada',
-        message: 'Tu cuenta quedo lista. Tus movimientos se guardaran para que puedas consultarlos despues.',
+        message: accountMode === 'register'
+          ? 'Tu cuenta quedo lista desde cero. Solo se guardaran los movimientos que agregues a partir de ahora.'
+          : 'Tu cuenta quedo lista. Tus movimientos se guardaran para que puedas consultarlos despues.',
         tone: 'success'
       });
     } catch (error) {
@@ -425,6 +465,7 @@ export default function App() {
     setAccountProfile(null);
     setPaymentRecords([]);
     setIsPro(false);
+    setSubscriptionEndsAt(null);
     setAccountName('');
     setAccountEmail('');
     setAccountPhone('');
@@ -443,6 +484,20 @@ export default function App() {
   const handleAddGoal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!goalName || !goalTarget || !goalDate) return;
+
+    if (!isPro && savingsGoals.length >= FREE_GOAL_LIMIT) {
+      setIsGoalModalOpen(false);
+      setIsProModalOpen(true);
+      setNotice({
+        title: 'Límite de metas gratis',
+        message: `En el plan gratis puedes manejar hasta ${FREE_GOAL_LIMIT} metas. Con PRO puedes crear metas ilimitadas y ver cuánto ahorrar por quincena.`,
+        tone: 'info',
+        actionLabel: 'Ver PRO',
+        onAction: () => setIsProModalOpen(true)
+      });
+      return;
+    }
+
     const newGoal: SavingsGoal = {
       id: Date.now().toString(),
       name: goalName,
@@ -484,6 +539,20 @@ export default function App() {
   const handleAddDebt = (e: React.FormEvent) => {
     e.preventDefault();
     if (!debtName || !debtBalance) return;
+
+    if (!isPro && debts.length >= FREE_DEBT_LIMIT) {
+      setIsDebtModalOpen(false);
+      setIsProModalOpen(true);
+      setNotice({
+        title: 'Límite de deudas gratis',
+        message: `En el plan gratis puedes manejar hasta ${FREE_DEBT_LIMIT} deudas. Con PRO puedes registrar deudas ilimitadas y recibir una estrategia de pago.`,
+        tone: 'info',
+        actionLabel: 'Ver PRO',
+        onAction: () => setIsProModalOpen(true)
+      });
+      return;
+    }
+
     const newDebt: Debt = {
       id: Date.now().toString(),
       name: debtName,
@@ -593,8 +662,30 @@ export default function App() {
     - (smallExpenseTotal > totalIncome * 0.08 ? 10 : 0)
   ));
   const financialHealthLabel = financialHealthScore >= 75 ? 'Bien' : financialHealthScore >= 50 ? 'Alerta' : 'Crítico';
+  const mainOverspentCategory = overspentCategories[0];
+  const goalBehind = goalPlans.find((goal) => goal.isBehind);
+  const proActionItems = [
+    mainOverspentCategory
+      ? `Baja ${mainOverspentCategory.category} en ${formatCOP(Math.max(0, mainOverspentCategory.spent - mainOverspentCategory.limit))} para volver al rango sugerido.`
+      : '',
+    debtPressure > 35
+      ? 'Evita nuevas cuotas y prioriza la deuda con mayor interés hasta que las deudas bajen del 35% de tus ingresos.'
+      : '',
+    smallExpenseTotal > 0
+      ? `Separa ${formatCOP(Math.floor(smallExpenseTotal / 2))} de gastos pequeños para una meta o para abonar a deuda.`
+      : '',
+    goalBehind
+      ? `Refuerza "${goalBehind.name}" con ${formatCOP(goalBehind.quincenaAmount)} por quincena para llegar a tiempo.`
+      : '',
+    currentBalance > 0 && savingsCapacity > 0
+      ? `Reserva ${formatCOP(Math.floor(savingsCapacity * 0.2))} como colchón antes de gastar el saldo libre.`
+      : ''
+  ].filter(Boolean).slice(0, 3);
   const emergencyMode = emergencyReasons.length > 0;
   const hasActiveSession = Boolean(accountProfile && apiToken);
+  const formattedSubscriptionEnd = subscriptionEndsAt
+    ? new Date(subscriptionEndsAt).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
 
   const renderAccountForm = () => (
     <form onSubmit={handleSaveAccount} noValidate>
@@ -708,6 +799,7 @@ export default function App() {
         <div className="sim-box highlight">
           <p>Plan</p>
           <h4>{isPro ? 'PRO' : 'Gratis'}</h4>
+          {formattedSubscriptionEnd && <p>Hasta {formattedSubscriptionEnd}</p>}
         </div>
         <div className="sim-box">
           <p>Pagos</p>
@@ -847,7 +939,7 @@ export default function App() {
               </button>
             </div>
 
-            {isPro && (
+            {isPro ? (
               <button 
                 className="btn btn-secondary" 
                 style={{ padding: '8px 12px', fontSize: '0.78rem', width: 'auto', alignSelf: 'flex-start', margin: '4px 0 10px 0' }}
@@ -865,6 +957,23 @@ export default function App() {
                 }}
               >
                 📥 Descargar Excel (CSV)
+              </button>
+            ) : (
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '8px 12px', fontSize: '0.78rem', width: 'auto', alignSelf: 'flex-start', margin: '4px 0 10px 0' }}
+                onClick={() => {
+                  setIsProModalOpen(true);
+                  setNotice({
+                    title: 'Reporte PRO',
+                    message: 'La descarga de reportes está incluida en PRO para que puedas revisar tu historial fuera de la app.',
+                    tone: 'info',
+                    actionLabel: 'Ver PRO',
+                    onAction: () => setIsProModalOpen(true)
+                  });
+                }}
+              >
+                📥 Descargar reporte PRO
               </button>
             )}
 
@@ -1114,7 +1223,7 @@ export default function App() {
                     <span className="badge badge-orange" style={{ marginBottom: '6px' }}>PLAN PRO</span>
                     <h4 style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-dark)' }}>Desbloquea SalvaQuincena PRO</h4>
                     <p style={{ fontSize: '0.72rem', color: 'var(--text-medium)', marginTop: '2px' }}>
-                      Plan mensual <strong>$15.000 COP</strong> o anual <strong>$165.000 COP</strong>.
+                      Más metas, más deudas, reportes y recomendaciones. Mensual <strong>$15.000 COP</strong> o anual <strong>$165.000 COP</strong>.
                     </p>
                   </div>
                   <button className="btn" style={{ width: 'auto', fontSize: '0.75rem', padding: '8px 12px', whiteSpace: 'nowrap' }} onClick={() => setIsProModalOpen(true)}>
@@ -1128,7 +1237,7 @@ export default function App() {
                   🌟 SalvaQuincena PRO Activo
                 </div>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-medium)', marginBottom: '12px' }}>
-                  Tu planeador inteligente de ingresos basado en el presupuesto ideal (50/30/20):
+                  Tu plan PRO está activo{formattedSubscriptionEnd ? ` hasta ${formattedSubscriptionEnd}` : ''}. Planeador inteligente basado en el presupuesto ideal (50/30/20):
                 </p>
                 <div style={{ background: 'var(--bg-color)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', textAlign: 'center', fontSize: '0.7rem' }}>
@@ -1191,6 +1300,27 @@ export default function App() {
                       <h4>{formatCOP(savingsCapacity)}</h4>
                       <p>después de gastos y mínimos</p>
                     </div>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-title">
+                    <Zap size={18} style={{ color: 'var(--primary-orange)' }} /> Próximos pasos
+                  </div>
+                  <div className="list-container">
+                    {proActionItems.map((item) => (
+                      <div key={item} className="item-row">
+                        <div className="item-details">
+                          <h4>Acción recomendada</h4>
+                          <p>{item}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {proActionItems.length === 0 && (
+                      <p style={{ color: 'var(--text-light)', fontSize: '0.8rem', textAlign: 'center', padding: '8px 0' }}>
+                        Registra ingresos, gastos, metas o deudas para recibir recomendaciones más precisas.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -1822,27 +1952,49 @@ export default function App() {
               </button>
             </div>
 
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px', background: '#fff' }}>
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '8px' }}>Gratis</h4>
+                <p style={{ fontSize: '0.74rem', color: 'var(--text-medium)', lineHeight: 1.45 }}>
+                  Balance, movimientos, hasta {FREE_GOAL_LIMIT} metas y hasta {FREE_DEBT_LIMIT} deudas.
+                </p>
+              </div>
+              <div style={{ border: '1px solid var(--primary-orange-light)', borderRadius: '8px', padding: '12px', background: 'linear-gradient(135deg, #FFF8F3, #FFFFFF)' }}>
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary-orange-dark)', marginBottom: '8px' }}>PRO</h4>
+                <p style={{ fontSize: '0.74rem', color: 'var(--text-medium)', lineHeight: 1.45 }}>
+                  Metas y deudas ilimitadas, reportes, calendario, diagnóstico y recomendaciones.
+                </p>
+              </div>
+            </div>
+
             {/* Features list */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
                 <span style={{ fontSize: '1.2rem' }}>📊</span>
                 <div>
-                  <h4 style={{ fontSize: '0.88rem', fontWeight: 600 }}>Asesor de Presupuesto 50/30/20</h4>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Divide automáticamente tus ingresos: necesidades, deseos y ahorros.</p>
+                  <h4 style={{ fontSize: '0.88rem', fontWeight: 600 }}>Presupuesto 50/30/20</h4>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Organiza tus ingresos en gastos necesarios, gustos, ahorro y deudas.</p>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
                 <span style={{ fontSize: '1.2rem' }}>📥</span>
                 <div>
-                  <h4 style={{ fontSize: '0.88rem', fontWeight: 600 }}>Exportar Reportes a Excel / CSV</h4>
+                  <h4 style={{ fontSize: '0.88rem', fontWeight: 600 }}>Reportes descargables</h4>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Descarga todo tu historial con un clic.</p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '1.2rem' }}>🧭</span>
+                <div>
+                  <h4 style={{ fontSize: '0.88rem', fontWeight: 600 }}>Recomendaciones prácticas</h4>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>La app te muestra próximos pasos según tus gastos, deudas y metas.</p>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
                 <span style={{ fontSize: '1.2rem' }}>✨</span>
                 <div>
-                  <h4 style={{ fontSize: '0.88rem', fontWeight: 600 }}>Sin Anuncios ni Límites</h4>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Metas y deudas ilimitadas.</p>
+                  <h4 style={{ fontSize: '0.88rem', fontWeight: 600 }}>Sin límites</h4>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Crea todas las metas y deudas que necesites.</p>
                 </div>
               </div>
             </div>

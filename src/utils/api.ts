@@ -16,6 +16,7 @@ type ApiUser = {
 
 type ApiSubscription = {
   status?: string;
+  plan?: string | null;
   ends_at?: string | null;
 };
 
@@ -72,6 +73,8 @@ export type SyncResult = {
   debts: Debt[];
   payments: PaymentRecord[];
   isPro: boolean;
+  subscriptionEndsAt: string | null;
+  subscriptionPlan: string | null;
 };
 
 export function getApiToken(): string {
@@ -259,8 +262,10 @@ function mapSyncResponse(response: {
   }));
 
   const isPro = response.subscription?.status === 'active';
+  const subscriptionEndsAt = response.subscription?.ends_at || null;
+  const subscriptionPlan = response.subscription?.plan || null;
 
-  return { transactions, savingsGoals, debts, payments, isPro };
+  return { transactions, savingsGoals, debts, payments, isPro, subscriptionEndsAt, subscriptionPlan };
 }
 
 export async function fetchSync(): Promise<SyncResult> {
